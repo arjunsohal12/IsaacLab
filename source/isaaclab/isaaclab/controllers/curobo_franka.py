@@ -89,8 +89,6 @@ class CuroboFrankaController:
         # Get the actuator position offset for the robot's arm
         # self.arm_command_offset = self.robot.data.actuator_pos_offset[:, : self.robot.num_joints] # need to fix this
         
-        # Initialize command transformation tensor with zeros
-        self.command_tf = torch.zeros(self.robot.num_joints, self.action_dim, device=self.robot.device)
 
         self.setup_robot_model()
 
@@ -129,13 +127,6 @@ class CuroboFrankaController:
         self, command: torch.Tensor):
         # Apply transformation to self.command from robot finger to robot hand
         self._command = command
-        # self.ee_info = self.robot.ee_info # check this I dont think we have ee info
-        self.command_tf[:, 0] = self._command[:, 0] + self.pos_offset[0]
-        self.command_tf[:, 1] = self._command[:, 1] + self.pos_offset[1]
-        self.command_tf[:, 2] = self._command[:, 2] + self.pos_offset[2] 
-        self.command_tf[:, 3:7] = self._command[:, 3:7]
-        self.error_i = torch.zeros(self.env.num_envs, 3, device=self.env.device)
-        self.first_call = True
 
         return None
 
