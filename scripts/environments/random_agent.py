@@ -28,15 +28,27 @@ app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 """Rest everything follows."""
+from isaaclab.utils import configclass
 
 import gymnasium as gym
 import torch
-
+from isaaclab.controllers import CuroboFrankaController
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import parse_env_cfg
 
 # PLACEHOLDER: Extension template (do not remove this comment)
+@configclass
+class ControllerCfg:
+    """Configuration for curobo inverse kinematics controller."""
 
+    command_type = "pose"
+    """Type of task-space command to control the articulation's body.
+
+    If "position", then the controller only controls the position of the articulation's body.
+    Otherwise, the controller controls the pose of the articulation's body.
+    """
+
+    use_relative_mode: bool = False
 
 def main():
     """Random actions agent with Isaac Lab environment."""
@@ -50,6 +62,16 @@ def main():
     # print info (this is vectorized environment)
     print(f"[INFO]: Gym observation space: {env.observation_space}")
     print(f"[INFO]: Gym action space: {env.action_space}")
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    curobo_controller = CuroboFrankaController(ControllerCfg(), env, 1, "robot", device)
+    position = torch.randn((1, 3))
+    position = torch.tensor([[0.45 , 0.00 , 0.25]])
+
+    orientation = torch.tensor([[1, 0, 0, 0]])
+    pose = torch.cat((position, orientation), 1)
+    curobo_controller.set_command(pose)
+    robot = curobo_controller.robot
     # reset environment
     env.reset()
     # simulate environment
@@ -57,9 +79,20 @@ def main():
         # run everything in inference mode
         with torch.inference_mode():
             # sample actions from -1 to 1
-            actions = 2 * torch.rand(env.action_space.shape, device=env.unwrapped.device) - 1
+            actions = curobo_controller.compute(robot.data.joint_pos, robot.data.joint_vel)
+            command = torch.zeros(1, 8, device = device)
             # apply actions
-            env.step(actions)
+            if actions != None:
+                actions = actions.unsqueeze(0)
+                prev_actions = actions
+                command[:, :7] = actions
+
+            else:
+                # command[:, :7] = robot.data.joint_pos.squeeze(0)[:7]
+                command[:, :7] = prev_actions
+
+            # print(command)
+            env.step(command)
 
     # close the simulator
     env.close()
