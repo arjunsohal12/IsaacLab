@@ -66,9 +66,9 @@ def main():
 
     curobo_controller = CuroboFrankaController(ControllerCfg(), env, 1, "robot", device)
     position = torch.randn((1, 3))
-    position = torch.tensor([[0.45 , 0.00 , 0.25]])
+    position = torch.tensor([[0.4, 0.0, 0.0303]])
 
-    orientation = torch.tensor([[1, 0, 0, 0]])
+    orientation = torch.tensor([[0, -1, 0, 0]])
     pose = torch.cat((position, orientation), 1)
     curobo_controller.set_command(pose)
     robot = curobo_controller.robot
@@ -88,10 +88,9 @@ def main():
                 command[:, :7] = actions
 
             else:
-                # command[:, :7] = robot.data.joint_pos.squeeze(0)[:7]
-                command[:, :7] = prev_actions
+                command[:, :7] = robot.data.joint_pos.squeeze(0)[:7]
+                # command[:, :7] = prev_actions
 
-            # print(command)
             env.step(command)
 
     # close the simulator

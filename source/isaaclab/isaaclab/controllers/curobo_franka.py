@@ -65,9 +65,7 @@ class CuroboFrankaController:
         self.usd_helper = UsdHelper()
         self.robot = self.env.scene._articulations[self.agent_name] # maybe try and find better way to get this
         self.dof_names = self.robot.joint_names
-        print(self.env.scene._articulations)
-        print(self.dof_names)
-        print(self.robot.num_joints)
+
         # combine scene dicts to get an objects dict, try to change this to be cleaner later, not sure how to handle it now
         self.objects = {**self.env.scene._articulations,  **self.env.scene._rigid_objects}
         # Define the joint names for the robot, not sure why this is here when we access above? Check it
@@ -85,10 +83,7 @@ class CuroboFrankaController:
         self.idx_list = None
 
         self._num_actions = self.robot.num_joints
-        
-        # Get the actuator position offset for the robot's arm
-        # self.arm_command_offset = self.robot.data.actuator_pos_offset[:, : self.robot.num_joints] # need to fix this
-        
+    
 
         self.setup_robot_model()
 
@@ -222,8 +217,7 @@ class CuroboFrankaController:
 
         result = self.motion_gen.plan_single(cu_js.unsqueeze(0), ik_goal, self.plan_config.clone())
         self.save_counter = 0
-        # print(result)
-        # print(self.robot_cfg)
+
         return result
     
 
@@ -236,7 +230,6 @@ class CuroboFrankaController:
 
         if self.cmd_plan is None:
             self.cmd_idx = 0
-            self._step_idx = 0
             # Set EE goals
             ee_translation_goal = self._command[:, 0:3] + torch.as_tensor(self.pos_offset, device=self._command.device)
             ee_orientation_goal = self._command[:, 3:7]
@@ -263,8 +256,6 @@ class CuroboFrankaController:
             self.cmd_idx = 0
             self.cmd_plan = None
         
-        self._step_idx += 1
-
         return cmd_state.position
     
 
@@ -278,9 +269,6 @@ class CuroboFrankaController:
         If a valid command is generated, it adjusts for any offsets and returns the updated joint positions.
         """
 
-        # if self.count % 10 == 0:
-        #     self.update()
-        # self.count += 1
         import time
         t0 = time.time()
 
@@ -307,9 +295,18 @@ class CuroboFrankaController:
 
         art_action = self.forward(cu_js)
         print(self.motion_gen.kinematics.compute_kinematics(cu_js).ee_pose)
+        # print(self.motion_gen.kinematics.compute_kinematics(JointState (
+        #     position = self.cmd_plan[-1].position,
+        #     velocity = self.cmd_plan[-1].velocity,
+        #     jerk=self.tensor_args.to_device(self.cmd_plan[-1].velocity) * 0.0,
+        #     joint_names=self.cmd_js_names,
+        # )).ee_pose)
+
+        # print(self.cmd_plan[-1].position)
+        # print(joint_positions)
+        # print(self.dof_names)
+        # print(self.cmd_js_names)
         if art_action is not None:
-            # self.arm_command_offset = self.arm_command_offset.squeeze().to(art_action.joint_positions.device)
-            # art_action.joint_positions -= self.arm_command_offset
 
             t1 = time.time()
             print("forwarding time:", t1-t0)            
