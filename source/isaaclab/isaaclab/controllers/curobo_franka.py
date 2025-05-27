@@ -122,7 +122,7 @@ class CuroboFrankaController:
         self, command: torch.Tensor):
         # Apply transformation to self.command from robot finger to robot hand
         self._command = command
-
+        self._command[:, 0:3] += torch.as_tensor(self.pos_offset, device=self._command.device)
         return None
 
     def setup_world_model(self) -> None:
@@ -231,9 +231,8 @@ class CuroboFrankaController:
         if self.cmd_plan is None:
             self.cmd_idx = 0
             # Set EE goals
-            ee_translation_goal = self._command[:, 0:3] + torch.as_tensor(self.pos_offset, device=self._command.device)
+            ee_translation_goal = self._command[:, 0:3]
             ee_orientation_goal = self._command[:, 3:7]
-
             # compute curobo solution:
             result = self.plan(ee_translation_goal, ee_orientation_goal, cu_js)
             succ = result.success.item()
@@ -292,9 +291,11 @@ class CuroboFrankaController:
         )
 
         cu_js = cu_js.get_ordered_joint_state(self.motion_gen.kinematics.joint_names)
+        
+        self.ee_pose = self.motion_gen.kinematics.compute_kinematics(cu_js).ee_pose
+        print(self.motion_gen.kinematics.compute_kinematics(cu_js).ee_pose)
 
         art_action = self.forward(cu_js)
-        print(self.motion_gen.kinematics.compute_kinematics(cu_js).ee_pose)
         # print(self.motion_gen.kinematics.compute_kinematics(JointState (
         #     position = self.cmd_plan[-1].position,
         #     velocity = self.cmd_plan[-1].velocity,

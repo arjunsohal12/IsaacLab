@@ -82,13 +82,17 @@ def main():
             actions = curobo_controller.compute(robot.data.joint_pos, robot.data.joint_vel)
             command = torch.zeros(1, 8, device = device)
             # apply actions
-            if actions != None:
+            print(torch.norm(curobo_controller._command[0, :3].to(device) - curobo_controller.ee_pose.position.to(device)))
+            print(curobo_controller._command)
+            if torch.norm(curobo_controller._command[0, :3].to(device) - curobo_controller.ee_pose.position.to(device)) > 0.01 and actions != None:
                 actions = actions.unsqueeze(0)
                 prev_actions = actions
                 command[:, :7] = actions
 
             else:
                 command[:, :7] = robot.data.joint_pos.squeeze(0)[:7]
+                command[:, 7] = -1
+
                 # command[:, :7] = prev_actions
 
             env.step(command)
