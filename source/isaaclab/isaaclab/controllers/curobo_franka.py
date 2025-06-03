@@ -293,20 +293,10 @@ class CuroboFrankaController:
         cu_js = cu_js.get_ordered_joint_state(self.motion_gen.kinematics.joint_names)
         
         self.ee_pose = self.motion_gen.kinematics.compute_kinematics(cu_js).ee_pose
-        print(self.motion_gen.kinematics.compute_kinematics(cu_js).ee_pose)
+        print(self.ee_pose)
 
         art_action = self.forward(cu_js)
-        # print(self.motion_gen.kinematics.compute_kinematics(JointState (
-        #     position = self.cmd_plan[-1].position,
-        #     velocity = self.cmd_plan[-1].velocity,
-        #     jerk=self.tensor_args.to_device(self.cmd_plan[-1].velocity) * 0.0,
-        #     joint_names=self.cmd_js_names,
-        # )).ee_pose)
 
-        # print(self.cmd_plan[-1].position)
-        # print(joint_positions)
-        # print(self.dof_names)
-        # print(self.cmd_js_names)
         if art_action is not None:
 
             t1 = time.time()

@@ -16,3 +16,4 @@ from .differential_ik_cfg import DifferentialIKControllerCfg
 from .operational_space import OperationalSpaceController
 from .operational_space_cfg import OperationalSpaceControllerCfg
 from .curobo_franka import CuroboFrankaController
+from .curobo_franka_cfg import CuroboControllerCfg

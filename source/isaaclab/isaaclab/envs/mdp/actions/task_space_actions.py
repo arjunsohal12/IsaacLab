@@ -16,6 +16,7 @@ import isaaclab.utils.math as math_utils
 import isaaclab.utils.string as string_utils
 from isaaclab.assets.articulation import Articulation
 from isaaclab.controllers.differential_ik import DifferentialIKController
+from isaaclab.controllers import CuroboFrankaController
 from isaaclab.controllers.operational_space import OperationalSpaceController
 from isaaclab.managers.action_manager import ActionTerm
 from isaaclab.sensors import ContactSensor, ContactSensorCfg, FrameTransformer, FrameTransformerCfg
@@ -26,6 +27,147 @@ if TYPE_CHECKING:
 
     from . import actions_cfg
 
+class CuroboAction(ActionTerm):
+    r"""Curobo action term.
+
+    This action term performs pre-processing of the raw actions using scaling transformation.
+
+    .. math::
+        \text{action} = \text{scaling} \times \text{input action}
+        \text{joint position} = J^{-} \times \text{action}
+
+    where :math:`\text{scaling}` is the scaling applied to the input action, and :math:`\text{input action}`
+    is the input action from the user, :math:`J` is the Jacobian over the articulation's actuated joints,
+    and \text{joint position} is the desired joint position command for the articulation's joints.
+    """
+
+    cfg: actions_cfg.CuroboActionCfg
+    """The configuration of the action term."""
+    _asset: Articulation
+    """The articulation asset on which the action term is applied."""
+    _scale: torch.Tensor
+    """The scaling factor applied to the input action. Shape is (1, action_dim)."""
+    _clip: torch.Tensor
+    """The clip applied to the input action."""
+
+    def __init__(self, cfg: actions_cfg.CuroboActionCfg, env: ManagerBasedEnv):
+        # initialize the action term
+        super().__init__(cfg, env)
+
+
+        self._joint_ids, self._joint_names = self._asset.find_joints(self.cfg.joint_names)
+        self._joint_ids = self._joint_ids[:7]
+        body_ids, body_names = self._asset.find_bodies(self.cfg.body_name)
+        if len(body_ids) != 1:
+            raise ValueError(
+                f"Expected one match for the body name: {self.cfg.body_name}. Found {len(body_ids)}: {body_names}."
+            )
+        # save only the first body index
+        self._body_idx = body_ids[0]
+        self._body_name = body_names[0]
+
+        # create the Curobo Controller
+        self._curobo_controller = CuroboFrankaController(
+            cfg=self.cfg.controller, env=env, num_envs=self.num_envs, agent_name = self.cfg.asset_name, device=self.device
+        )
+
+        # create tensors for raw and processed actions
+        self._raw_actions = torch.zeros(self.num_envs, self.action_dim, device=self.device)
+        self._processed_actions = torch.zeros_like(self.raw_actions)
+
+        # save the scale as tensors
+        self._scale = torch.zeros((self.num_envs, self.action_dim), device=self.device)
+        self._scale[:] = torch.tensor(self.cfg.scale, device=self.device)
+
+        # convert the fixed offsets to torch tensors of batched shape
+        if self.cfg.body_offset is not None:
+            self._offset_pos = torch.tensor(self.cfg.body_offset.pos, device=self.device).repeat(self.num_envs, 1)
+            self._offset_rot = torch.tensor(self.cfg.body_offset.rot, device=self.device).repeat(self.num_envs, 1)
+        else:
+            self._offset_pos, self._offset_rot = None, None
+
+
+    """
+    Properties.
+    """
+
+    @property
+    def action_dim(self) -> int:
+        return self._curobo_controller.action_dim
+
+    @property
+    def raw_actions(self) -> torch.Tensor:
+        return self._raw_actions
+
+    @property
+    def processed_actions(self) -> torch.Tensor:
+        return self._processed_actions
+
+    """
+    Operations.
+    """
+
+    def process_actions(self, actions: torch.Tensor):
+        print("Given action:")
+        print(actions)
+        actions[:, 3:7] = torch.tensor([0, -1, 0, 0], device=self.device)
+        # store the raw actions
+        self._raw_actions[:] = actions
+        self._processed_actions[:] = self.raw_actions
+        # convert to position relative to robot
+        self._processed_actions[:, :3] = self.raw_actions[:, :3] - self._asset.data.root_pos_w[:]
+
+        self._processed_actions[:] = self._processed_actions * self._scale
+        # set command into controller
+        self._curobo_controller.set_command(self._processed_actions)
+
+    def apply_actions(self):
+        # obtain quantities from simulation
+        ee_pos_curr, ee_quat_curr = self._compute_frame_pose()
+        joint_pos = self._asset.data.joint_pos[:]
+        joint_vel = self._asset.data.joint_vel[:]
+        # compute the delta in joint-space
+        if ee_quat_curr.norm() != 0:
+            joint_pos_des = self._curobo_controller.compute(joint_pos, joint_vel)
+        else:
+            joint_pos_des = joint_pos.clone()
+
+        if joint_pos_des == None:
+            joint_pos_des = joint_pos.clone()[:, :7]
+        # set the joint position command
+        print(joint_pos)
+        print(joint_pos_des)
+        self._asset.set_joint_position_target(joint_pos_des, self._joint_ids)
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        self._raw_actions[env_ids] = 0.0
+
+    """
+    Helper functions.
+    """
+
+    def _compute_frame_pose(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Computes the pose of the target frame in the root frame.
+
+        Returns:
+            A tuple of the body's position and orientation in the root frame.
+        """
+        # obtain quantities from simulation
+        ee_pos_w = self._asset.data.body_pos_w[:, self._body_idx]
+        ee_quat_w = self._asset.data.body_quat_w[:, self._body_idx]
+        root_pos_w = self._asset.data.root_pos_w
+        root_quat_w = self._asset.data.root_quat_w
+        # compute the pose of the body in the root frame
+        ee_pose_b, ee_quat_b = math_utils.subtract_frame_transforms(root_pos_w, root_quat_w, ee_pos_w, ee_quat_w)
+        # account for the offset
+        if self.cfg.body_offset is not None:
+            ee_pose_b, ee_quat_b = math_utils.combine_frame_transforms(
+                ee_pose_b, ee_quat_b, self._offset_pos, self._offset_rot
+            )
+
+        return ee_pose_b, ee_quat_b
+
+    
 
 class DifferentialInverseKinematicsAction(ActionTerm):
     r"""Inverse Kinematics action term.
