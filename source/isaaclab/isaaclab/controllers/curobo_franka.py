@@ -174,7 +174,7 @@ class CuroboFrankaController:
             partial_ik_opt=False,
             parallel_finetune=True,
             pose_cost_metric=pose_metric,
-            time_dilation_factor=1.0
+            time_dilation_factor=0.75
         )
     def setup_robot_model(self) -> None:
         """

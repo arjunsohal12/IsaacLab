@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
     from . import actions_cfg
-
 class CuroboAction(ActionTerm):
     r"""Curobo action term.
 
@@ -86,6 +85,8 @@ class CuroboAction(ActionTerm):
         else:
             self._offset_pos, self._offset_rot = None, None
 
+        self.FRANKA_ROT = torch.tensor([[0.0, -0.70710678, 0.0, 0.70710678]], device=self.device)
+        self.cmd_idx = 0
 
     """
     Properties.
@@ -110,7 +111,7 @@ class CuroboAction(ActionTerm):
     def process_actions(self, actions: torch.Tensor):
         print("Given action:")
         print(actions)
-        actions[:, 3:7] = torch.tensor([0, -1, 0, 0], device=self.device)
+        # actions[:, 3:7] = math_utils.quat_mul(self.FRANKA_ROT, actions[:, 3:7])
         # store the raw actions
         self._raw_actions[:] = actions
         self._processed_actions[:] = self.raw_actions
@@ -119,7 +120,11 @@ class CuroboAction(ActionTerm):
 
         self._processed_actions[:] = self._processed_actions * self._scale
         # set command into controller
-        self._curobo_controller.set_command(self._processed_actions)
+        ee_pos_curr, ee_quat_curr = self._compute_frame_pose()
+        self.cmd_idx += 1
+        # compute the delta in joint-space
+        if self.cmd_idx <= 1 or ee_quat_curr.norm() == 0:
+            self._curobo_controller.set_command(self._processed_actions)
 
     def apply_actions(self):
         # obtain quantities from simulation
@@ -131,6 +136,7 @@ class CuroboAction(ActionTerm):
             joint_pos_des = self._curobo_controller.compute(joint_pos, joint_vel)
         else:
             joint_pos_des = joint_pos.clone()
+            print(f)
 
         if joint_pos_des == None:
             joint_pos_des = joint_pos.clone()[:, :7]
