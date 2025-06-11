@@ -13,7 +13,7 @@ from isaaclab.utils.math import apply_delta_pose, compute_pose_error
 # from omni.isaac.core.utils.types import ArticulationAction
 import carb
 from pxr import UsdGeom
-from omni.isaac.core.objects import sphere
+from isaacsim.core.api.objects import sphere
 
 # CuRobo
 from curobo.geom.sdf.world import CollisionCheckerType
