@@ -12,6 +12,8 @@ from isaaclab.utils.math import apply_delta_pose, compute_pose_error
 # from isaaclab.envs import ManagerBasedRLEnv
 # from omni.isaac.core.utils.types import ArticulationAction
 import carb
+from pxr import UsdGeom
+from omni.isaac.core.objects import sphere
 
 # CuRobo
 from curobo.geom.sdf.world import CollisionCheckerType
@@ -21,7 +23,7 @@ from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose
 from curobo.types.robot import RobotConfig
 from curobo.types.state import JointState
-from curobo.util.usd_helper import UsdHelper
+from curobo.util.usd_helper import UsdHelper, get_mesh_attrs, Mesh, get_cube_attrs
 from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
 from curobo.wrap.reacher.motion_gen import (
     MotionGen,
@@ -139,9 +141,42 @@ class CuroboFrankaController:
         # Add obstacles to our world model config
         for obstacle in obstacles:
             self._world_cfg.add_obstacle(obstacle)
+        print(obstacles)
+        # prims go under extras, lets see if we can load prims and rigid objects directly from the scene into the obstacles, 
+        # Each instanceable object will have meshes somewhere under it, in a child xform. See if we can extract those for the faces/vertices of world model
+        # metadata = get_mesh_attrs(self.env.scene.rigid_objects["object"])
+        self.add_instanceable_object_from_path("/World/envs/env_0/Object/collisions/collisions")
+        self.add_instanceable_object_from_path("/World/envs/env_0/Table/Collisions/Cube")
+
+        print(self._world_cfg.objects)
+        
+        file_path = "/home/arjun/Desktop/debug_mesh.obj"
+        print("saving the world")
+        self._world_cfg.save_world_as_mesh(file_path)
+
+        # print(f)
         # Create the world model
         self.obstacle_map = {obstacle.name: obstacle for obstacle in obstacles}
 
+    def add_instanceable_object_from_path(self, path):
+        mesh_prim = self.env.sim.stage.GetPrimAtPath(path)
+
+        if mesh_prim.IsInstance():
+            # mesh_prim is the “root” of an mesh_primance
+            mesh_prim = mesh_prim.GetPrototype()
+        elif mesh_prim.IsInstanceProxy():
+            # mesh_prim is a proxy under one of the mesh_primances
+            mesh_prim = mesh_prim.GetPrimInPrototype()
+        else:
+            # not mesh_primanced at all
+            mesh_prim = mesh_prim
+
+        print(mesh_prim.GetTypeName())
+        print("  Attributes:", [a.GetName() for a in mesh_prim.GetAttributes()])
+
+        metadata = get_cube_attrs(mesh_prim, cache=self.usd_helper._xform_cache)
+        self._world_cfg.add_obstacle(metadata)
+        
     def setup_motion_generation(self) -> None:
         """
         Sets up motion generator for CuRobo
@@ -167,9 +202,9 @@ class CuroboFrankaController:
         pose_metric = None
         # Create config for motion generation plans
         self.plan_config = MotionGenPlanConfig(
-            enable_graph=False,
+            enable_graph=True,
             max_attempts=10,
-            enable_graph_attempt=None,
+            enable_graph_attempt=3,
             enable_finetune_trajopt=True,
             partial_ik_opt=False,
             parallel_finetune=True,
@@ -296,6 +331,26 @@ class CuroboFrankaController:
         print(self.ee_pose)
 
         art_action = self.forward(cu_js)
+
+
+
+        obstacle_names = [obj.name for obj in self._world_cfg.objects if hasattr(obj, "name")]
+        obstacle_info = {obj.name: obj.pose for obj in self._world_cfg.objects if hasattr(obj, 'pose') and hasattr(obj, 'name')}
+        
+        print(obstacle_info)
+
+        pose = Pose.from_list([0, 0, 0, 1, 0, 0, 0])
+        sph_list = self.kinematics_model.get_robot_as_spheres(joint_positions)
+        for si, s in enumerate(sph_list[0]):
+            sp = sphere.VisualSphere(
+                prim_path="/curobo/robot_sphere_" + "_" + str(si),
+                position=np.ravel(s.position)
+                + pose.position[0].cpu().numpy(),
+                radius=float(s.radius),
+                color=np.array([0, 0.8, 0.2]),
+            )
+
+
 
         if art_action is not None:
 

@@ -147,6 +147,7 @@ class CuroboAction(ActionTerm):
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         self._raw_actions[env_ids] = 0.0
+        self.cmd_idx = 0
 
     """
     Helper functions.
