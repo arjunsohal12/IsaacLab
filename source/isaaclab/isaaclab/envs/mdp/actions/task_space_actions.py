@@ -123,7 +123,9 @@ class CuroboAction(ActionTerm):
         ee_pos_curr, ee_quat_curr = self._compute_frame_pose()
         self.cmd_idx += 1
         # compute the delta in joint-space
-        if self.cmd_idx <= 1 or ee_quat_curr.norm() == 0:
+        # if self.cmd_idx <= 1 or ee_quat_curr.norm() == 0:
+        # only set command once current one is finished?
+        if self._curobo_controller.cmd_plan == None:
             self._curobo_controller.set_command(self._processed_actions)
 
     def apply_actions(self):

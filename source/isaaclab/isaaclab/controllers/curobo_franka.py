@@ -140,6 +140,7 @@ class CuroboFrankaController:
         # Apply transformation to self.command from robot finger to robot hand
         self._command = command
         self._command[:, 0:3] += torch.as_tensor(self.pos_offset, device=self._command.device)
+        self.new_command = True
         return None
 
     def setup_world_model(self) -> None:
@@ -419,6 +420,9 @@ class CuroboFrankaController:
             orientation = [1, 0, 0, 0],
             scale = [0.01, 0.01, 0.01]
         )
+        if self.new_command:
+            self.new_command = False
+            self.env.sim.pause()
         # file_path = "/home/arjun/Desktop/debug_mesh.obj"
         # print("saving the world")
         # self._world_cfg.save_world_as_mesh(file_path)
