@@ -166,9 +166,7 @@ class CuroboFrankaController:
 
         print(self._world_cfg.objects)
         print(self.objects)
-        file_path = "/home/arjun/Desktop/debug_mesh.obj"
-        print("saving the world")
-        self._world_cfg.save_world_as_mesh(file_path)
+
 
         # print(f)
         # Create the world model
@@ -366,7 +364,9 @@ class CuroboFrankaController:
 
         for object in self._world_cfg.objects:
             if object.name in self.objects:
-                object.pose[:3] = self.objects[object.name].data.root_state_w[0, :3]
+                object.pose[:3] = self.objects[object.name].data.root_state_w[0, :3].cpu()
+
+        self.motion_gen.update_world(self._world_cfg)
             # self.motion_gen.world_model.update_obstacle_pose(self.obstacle_map[obstacle_name].pose, name=obstacle_name) Figure out how to update this
 
         
@@ -411,7 +411,17 @@ class CuroboFrankaController:
                 orientation = object.pose[3:7],
                 scale = object.dims
             )
-        # cub_list = self._world_cfg.get_mesh_world()
+        # this confirms there is some issue with the command, whenever the robot is ready to grasp it goes somewhere else and comes back
+        # resulting  in the weird behavior we see
+        target = cuboid.VisualCuboid(
+            prim_path = "/target",
+            position = self._command[0, :3].tolist(),
+            orientation = [1, 0, 0, 0],
+            scale = [0.01, 0.01, 0.01]
+        )
+        # file_path = "/home/arjun/Desktop/debug_mesh.obj"
+        # print("saving the world")
+        # self._world_cfg.save_world_as_mesh(file_path)
 
         if art_action is not None:
 
