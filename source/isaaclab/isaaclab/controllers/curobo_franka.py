@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from isaaclab.envs.mdp.observations import joint_pos
 import torch
 from typing import TYPE_CHECKING
 import gym
@@ -13,7 +14,7 @@ from isaaclab.utils.math import apply_delta_pose, compute_pose_error
 # from omni.isaac.core.utils.types import ArticulationAction
 import carb
 from pxr import UsdGeom
-from isaacsim.core.api.objects import sphere
+from isaacsim.core.api.objects import sphere, cuboid
 
 # CuRobo
 from curobo.geom.sdf.world import CollisionCheckerType
@@ -23,7 +24,7 @@ from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose
 from curobo.types.robot import RobotConfig
 from curobo.types.state import JointState
-from curobo.util.usd_helper import UsdHelper, get_mesh_attrs, Mesh, get_cube_attrs
+from curobo.util.usd_helper import UsdHelper, get_mesh_attrs, Mesh, get_cube_attrs, get_capsule_attrs, get_cylinder_attrs, get_sphere_attrs
 from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
 from curobo.wrap.reacher.motion_gen import (
     MotionGen,
@@ -34,10 +35,23 @@ from curobo.wrap.reacher.motion_gen import (
 )
 from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
 import numpy as np
-
+from pxr import UsdGeom, Usd, Gf
+from pxr.UsdGeom import XformCache
 if TYPE_CHECKING:
     from .differential_ik_cfg import DifferentialIKControllerCfg
 
+def decompose_matrix(matrix: Gf.Matrix4d):
+    """
+    Converts a Gf.Matrix4d to (position, quaternion) as numpy arrays.
+    """
+    transform = Gf.Transform()
+    transform.SetMatrix(matrix)
+    translation = transform.GetTranslation()
+    rotation = transform.GetRotation().GetQuat()
+
+    pos = [translation[0], translation[1], translation[2]]
+    quat = [rotation.GetImaginary()[0], rotation.GetImaginary()[1], rotation.GetImaginary()[2], rotation.GetReal()]
+    return pos, quat
 
 class CuroboFrankaController:
     r"""Curobocontroller.
@@ -69,6 +83,7 @@ class CuroboFrankaController:
         self.dof_names = self.robot.joint_names
 
         # combine scene dicts to get an objects dict, try to change this to be cleaner later, not sure how to handle it now
+        # maybe add self.env.scene._extras for prims, not sure if we need to update prim positions since they dont do much
         self.objects = {**self.env.scene._articulations,  **self.env.scene._rigid_objects}
         # Define the joint names for the robot, not sure why this is here when we access above? Check it
         self.cmd_js_names = [
@@ -145,11 +160,12 @@ class CuroboFrankaController:
         # prims go under extras, lets see if we can load prims and rigid objects directly from the scene into the obstacles, 
         # Each instanceable object will have meshes somewhere under it, in a child xform. See if we can extract those for the faces/vertices of world model
         # metadata = get_mesh_attrs(self.env.scene.rigid_objects["object"])
-        self.add_instanceable_object_from_path("/World/envs/env_0/Object/collisions/collisions")
-        self.add_instanceable_object_from_path("/World/envs/env_0/Table/Collisions/Cube")
+        self.add_instanceable_object_from_path("/World/envs/env_0/Table/Collisions/Cube", obj_name="table")
+
+        self.add_instanceable_object_from_path("/World/envs/env_0/Object/collisions/collisions", obj_name="object")
 
         print(self._world_cfg.objects)
-        
+        print(self.objects)
         file_path = "/home/arjun/Desktop/debug_mesh.obj"
         print("saving the world")
         self._world_cfg.save_world_as_mesh(file_path)
@@ -158,8 +174,14 @@ class CuroboFrankaController:
         # Create the world model
         self.obstacle_map = {obstacle.name: obstacle for obstacle in obstacles}
 
-    def add_instanceable_object_from_path(self, path):
+    def add_instanceable_object_from_path(self, path, obj_name, prim=True):
         mesh_prim = self.env.sim.stage.GetPrimAtPath(path)
+        
+        if not prim:
+            rigidbody = self.env.scene._rigid_objects[obj_name]
+            position, orientation = rigidbody.data.root_state_w[0, :3], rigidbody.data.root_state_w[0, 3:7]
+        else:
+            position, orientation = self.get_world_pose_from_any_prim(mesh_prim)
 
         if mesh_prim.IsInstance():
             # mesh_prim is the “root” of an mesh_primance
@@ -173,9 +195,45 @@ class CuroboFrankaController:
 
         print(mesh_prim.GetTypeName())
         print("  Attributes:", [a.GetName() for a in mesh_prim.GetAttributes()])
+        print(mesh_prim.IsA(UsdGeom.Mesh))
 
-        metadata = get_cube_attrs(mesh_prim, cache=self.usd_helper._xform_cache)
+        if mesh_prim.IsA(UsdGeom.Cube):
+            metadata = get_cube_attrs(mesh_prim, cache=self.usd_helper._xform_cache)
+        elif mesh_prim.IsA(UsdGeom.Sphere):
+            metadata = get_sphere_attrs(mesh_prim, cache=self.usd_helper._xform_cache)
+        elif mesh_prim.IsA(UsdGeom.Mesh):
+            metadata = get_mesh_attrs(mesh_prim, cache=self.usd_helper._xform_cache)
+            if metadata is None: # Curobo only support Triangle mesh, treat as cube for now until I find a better solution
+                metadata = get_cube_attrs(mesh_prim, cache=self.usd_helper._xform_cache)
+        elif mesh_prim.IsA(UsdGeom.Cylinder):
+            metadata = get_cylinder_attrs(mesh_prim, cache=self.usd_helper._xform_cache)
+        elif mesh_prim.IsA(UsdGeom.Capsule):
+            metadata = get_capsule_attrs(mesh_prim, cache=self.usd_helper._xform_cache)
+
+        object_cfg = getattr(self.env.cfg.scene, obj_name)
+        metadata.pose = list(position) + object_cfg.init_state.rot
+        metadata.name = obj_name
+        print("Local Position:", position)
+        print("Local Rotation:", orientation)
+        print(metadata)
+        # print(f)
         self._world_cfg.add_obstacle(metadata)
+
+    def get_world_pose_from_any_prim(self, prim, time=Usd.TimeCode.Default()):
+        # If it's a proxy under an instance, get the actual instance path
+        xform_cache = XformCache(time)
+        world_matrix = xform_cache.GetLocalToWorldTransform(prim)
+
+        transform = Gf.Transform()
+        transform.SetMatrix(world_matrix)
+
+        pos = transform.GetTranslation()
+        quat = transform.GetRotation().GetQuat()
+
+        return (
+            [pos[0], pos[1], pos[2]],
+            [quat.GetImaginary()[0], quat.GetImaginary()[1], quat.GetImaginary()[2], quat.GetReal()]
+        )
         
     def setup_motion_generation(self) -> None:
         """
@@ -306,11 +364,9 @@ class CuroboFrankaController:
         import time
         t0 = time.time()
 
-        for obj_name, obj in self.objects.items():
-            for obstacle_name in self.obstacle_map:
-                if obj_name in obstacle_name:  # Check if obj_name is a substring
-                    self.obstacle_map[obstacle_name].pose = obj.data.root_state_w[0,:7].detach().cpu().tolist()
-                    break  # Stop searching once a match is found
+        for object in self._world_cfg.objects:
+            if object.name in self.objects:
+                object.pose[:3] = self.objects[object.name].data.root_state_w[0, :3]
             # self.motion_gen.world_model.update_obstacle_pose(self.obstacle_map[obstacle_name].pose, name=obstacle_name) Figure out how to update this
 
         
@@ -336,21 +392,26 @@ class CuroboFrankaController:
 
         obstacle_names = [obj.name for obj in self._world_cfg.objects if hasattr(obj, "name")]
         obstacle_info = {obj.name: obj.pose for obj in self._world_cfg.objects if hasattr(obj, 'pose') and hasattr(obj, 'name')}
-        
+        print(self._world_cfg.objects)
         print(obstacle_info)
-
         pose = Pose.from_list([0, 0, 0, 1, 0, 0, 0])
-        sph_list = self.kinematics_model.get_robot_as_spheres(joint_positions)
-        for si, s in enumerate(sph_list[0]):
-            sp = sphere.VisualSphere(
-                prim_path="/curobo/robot_sphere_" + "_" + str(si),
-                position=np.ravel(s.position)
-                + pose.position[0].cpu().numpy(),
-                radius=float(s.radius),
-                color=np.array([0, 0.8, 0.2]),
+        # sph_list = self.kinematics_model.get_robot_as_spheres(joint_positions)
+        # for si, s in enumerate(sph_list[0]):
+        #     sp = sphere.VisualSphere(
+        #         prim_path="/curobo/robot_sphere_" + "_" + str(si),
+        #         position=np.ravel(s.position)
+        #         + pose.position[0].cpu().numpy(),
+        #         radius=float(s.radius),
+        #         color=np.array([0, 0.8, 0.2]),
+        #     )
+        for i, object in enumerate(self._world_cfg.objects):
+            cube = cuboid.VisualCuboid(
+                prim_path = "/curobo/object" + "_" + str(i),
+                position = object.pose[:3],
+                orientation = object.pose[3:7],
+                scale = object.dims
             )
-
-
+        # cub_list = self._world_cfg.get_mesh_world()
 
         if art_action is not None:
 

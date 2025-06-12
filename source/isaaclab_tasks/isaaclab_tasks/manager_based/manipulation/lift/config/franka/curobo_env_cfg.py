@@ -90,15 +90,15 @@ class FrankaTeddyBearLiftEnvCfg(FrankaCubeLiftEnvCfg):
         self.scene.replicate_physics = False
 
         # Set events for the specific object type (deformable cube)
-        self.events.reset_object_position = EventTerm(
-            func=mdp.reset_nodal_state_uniform,
-            mode="reset",
-            params={
-                "position_range": {"x": (-0.1, 0.1), "y": (-0.25, 0.25), "z": (0.0, 0.0)},
-                "velocity_range": {},
-                "asset_cfg": SceneEntityCfg("object"),
-            },
-        )
+        # self.events.reset_object_position = EventTerm(
+        #     func=mdp.reset_nodal_state_uniform,
+        #     mode="reset",
+        #     params={
+        #         "position_range": {"x": (-0.1, 0.1), "y": (-0.25, 0.25), "z": (0.0, 0.0)},
+        #         "velocity_range": {},
+        #         "asset_cfg": SceneEntityCfg("object"),
+        #     },
+        # )
 
         # Remove all the terms for the state machine demo
         # TODO: Computing the root pose of deformable object from nodal positions is expensive.
