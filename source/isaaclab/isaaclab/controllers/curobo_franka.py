@@ -35,7 +35,7 @@ from curobo.wrap.reacher.motion_gen import (
 )
 from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
 import numpy as np
-from pxr import UsdGeom, Usd, Gf
+from pxr import UsdGeom, Usd, Gf, Vt
 from pxr.UsdGeom import XformCache
 if TYPE_CHECKING:
     from .differential_ik_cfg import DifferentialIKControllerCfg
@@ -153,16 +153,15 @@ class CuroboFrankaController:
         self.ignore_substring = ["Looks", "Materials", "defaultGroundPlane", "Visuals", "physicsScene", "collisions"]
         # Load stage and retrieve potential obstacles
         self.usd_helper.load_stage(self.env.sim.stage)
-        obstacles = self.usd_helper.get_obstacles_from_stage(ignore_substring=self.ignore_substring).get_collision_check_world()
-        # Add obstacles to our world model config
-        for obstacle in obstacles:
-            self._world_cfg.add_obstacle(obstacle)
-        print(obstacles)
+        # obstacles = self.usd_helper.get_obstacles_from_stage(ignore_substring=self.ignore_substring).get_collision_check_world()
+        # # Add obstacles to our world model config
+        # for obstacle in obstacles:
+        #     self._world_cfg.add_obstacle(obstacle)
         # prims go under extras, lets see if we can load prims and rigid objects directly from the scene into the obstacles, 
         # Each instanceable object will have meshes somewhere under it, in a child xform. See if we can extract those for the faces/vertices of world model
         # metadata = get_mesh_attrs(self.env.scene.rigid_objects["object"])
         self.add_instanceable_object_from_path("/World/envs/env_0/Table/Collisions/Cube", obj_name="table")
-
+        self.add_instanceable_object_from_path("/World/envs/env_0/beaker/Scene/Beaker_500mL", obj_name="beaker")
         self.add_instanceable_object_from_path("/World/envs/env_0/Object/collisions/collisions", obj_name="object")
 
         print(self._world_cfg.objects)
@@ -171,7 +170,7 @@ class CuroboFrankaController:
 
         # print(f)
         # Create the world model
-        self.obstacle_map = {obstacle.name: obstacle for obstacle in obstacles}
+        self.obstacle_map = {}
 
     def add_instanceable_object_from_path(self, path, obj_name, prim=True):
         mesh_prim = self.env.sim.stage.GetPrimAtPath(path)
@@ -365,8 +364,9 @@ class CuroboFrankaController:
 
         for object in self._world_cfg.objects:
             if object.name in self.objects:
-                object.pose[:3] = self.objects[object.name].data.root_state_w[0, :3].cpu()
-
+                object.pose[:3] = self.objects[object.name].data.root_state_w[0, :3].detach().cpu().tolist()
+        print(self._world_cfg.objects)
+        print(self.objects)
         self.motion_gen.update_world(self._world_cfg)
             # self.motion_gen.world_model.update_obstacle_pose(self.obstacle_map[obstacle_name].pose, name=obstacle_name) Figure out how to update this
 
@@ -406,23 +406,39 @@ class CuroboFrankaController:
         #         color=np.array([0, 0.8, 0.2]),
         #     )
         for i, object in enumerate(self._world_cfg.objects):
-            cube = cuboid.VisualCuboid(
-                prim_path = "/curobo/object" + "_" + str(i),
-                position = object.pose[:3],
-                orientation = object.pose[3:7],
-                scale = object.dims
-            )
+            if not isinstance(object, Mesh):
+                cube = cuboid.VisualCuboid(
+                    prim_path = "/curobo/object" + "_" + str(i),
+                    position = object.pose[:3],
+                    orientation = object.pose[3:7],
+                    scale = object.dims
+                )
+            elif isinstance(object, Mesh):
+                mesh_prim = UsdGeom.Mesh.Define(self.env.sim.stage,  "/curobo/object" + "_" + str(i))
+                mesh_prim.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*v) for v in object.vertices]))
+                
+                flat_indices = [i for face in object.faces for i in face]
+                counts = [len(face) for face in object.faces]
+                mesh_prim.CreateFaceVertexIndicesAttr(Vt.IntArray(flat_indices))
+                mesh_prim.CreateFaceVertexCountsAttr(Vt.IntArray(counts))
+
+                translation = object.pose[:3]
+
+                UsdGeom.XformCommonAPI(mesh_prim).SetTranslate(Gf.Vec3d(*translation))
+                # UsdGeom.XformCommonAPI(mesh_prim).SetScale(object.scale)
+
         # this confirms there is some issue with the command, whenever the robot is ready to grasp it goes somewhere else and comes back
         # resulting  in the weird behavior we see
         target = cuboid.VisualCuboid(
             prim_path = "/target",
             position = self._command[0, :3].tolist(),
             orientation = [1, 0, 0, 0],
-            scale = [0.01, 0.01, 0.01]
+            scale = [0.01, 0.01, 0.01],
+            color=np.array([1, 1, 1])
         )
         if self.new_command:
             self.new_command = False
-            self.env.sim.pause()
+            # self.env.sim.pause()
         # file_path = "/home/arjun/Desktop/debug_mesh.obj"
         # print("saving the world")
         # self._world_cfg.save_world_as_mesh(file_path)

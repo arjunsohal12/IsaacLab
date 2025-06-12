@@ -41,7 +41,7 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     ee_frame: FrameTransformerCfg = MISSING
     # target object: will be populated by agent env cfg
     object: RigidObjectCfg | DeformableObjectCfg = MISSING
-    # beaker: RigidObjectCfg = MISSING
+    beaker: RigidObjectCfg = MISSING
     # Table
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",

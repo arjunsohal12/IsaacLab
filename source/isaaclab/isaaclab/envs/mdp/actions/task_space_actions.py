@@ -53,7 +53,7 @@ class CuroboAction(ActionTerm):
         # initialize the action term
         super().__init__(cfg, env)
 
-
+        self.past_commands = set()
         self._joint_ids, self._joint_names = self._asset.find_joints(self.cfg.joint_names)
         self._joint_ids = self._joint_ids[:7]
         body_ids, body_names = self._asset.find_bodies(self.cfg.body_name)
@@ -123,10 +123,11 @@ class CuroboAction(ActionTerm):
         ee_pos_curr, ee_quat_curr = self._compute_frame_pose()
         self.cmd_idx += 1
         # compute the delta in joint-space
-        # if self.cmd_idx <= 1 or ee_quat_curr.norm() == 0:
         # only set command once current one is finished?
-        if self._curobo_controller.cmd_plan == None:
+        # if self._curobo_controller.cmd_plan == None:
+        if actions not in self.past_commands:
             self._curobo_controller.set_command(self._processed_actions)
+            self.past_commands.add(actions)
 
     def apply_actions(self):
         # obtain quantities from simulation
