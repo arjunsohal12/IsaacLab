@@ -118,11 +118,11 @@ class Move(Action):
 
 
         ee_frame_sensor = env.unwrapped.scene["ee_frame"]
-        current_pos = ee_frame_sensor.data.target_pos_w[env_ids, 0, :].clone() - env.unwrapped.scene.env_origins
+        current_pos = ee_frame_sensor.data.target_pos_w[env_ids, 0, :].clone()
         # current_pos = env._get_observations["ee_pos"]
 
         # TODO: Check if both of these are in full world and not env world frame
-        distance = torch.norm(self.target_positions_w[env_ids] - current_pos[env_ids], dim=1)
+        distance = torch.norm(self.target_positions_w[env_ids] - current_pos, dim=1)
         new_done = distance < self.position_threshold
         
         return action, new_done
@@ -140,7 +140,7 @@ class GripperAction(Action):
         
         # Get current end effector position in world frame and convert to base frame
         env = env.unwrapped
-        ee_pos_w = env.scene["ee_frame"].data.target_pos_w[env_ids, 0, :] - env.scene.env_origins[env_ids]
+        ee_pos_w = env.scene["ee_frame"].data.target_pos_w[env_ids, 0, :]
         ee_pos_b, _ = self._convert_world_to_base_frame(env, env_ids, ee_pos_w)
 
         action[:, 0:3] = ee_pos_b

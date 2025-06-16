@@ -24,7 +24,7 @@ class PickObject(CompositionalAction):
 
     def initialize(self, env):
         object_data = env.unwrapped.scene[self.object].data
-        object_position = object_data.root_pos_w - env.unwrapped.scene.env_origins
+        object_position = object_data.root_pos_w
         # will code these into the object itself later
         grasp_position = object_position.clone()
         grasp_position[:, 2] -= 0.05

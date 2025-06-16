@@ -115,7 +115,6 @@ class StateMachine:
             action_mask = (self.current_action_idx == action_idx) & active_mask
             # Convert boolean mask to indices
             action_env_ids = torch.nonzero(action_mask).squeeze(-1)
-                
             # Get the action and compute its values
             action = self.actions[action_idx]
             action_values, action_success, action_failure = action.compute_action(self.env, action_env_ids)
@@ -126,18 +125,8 @@ class StateMachine:
 
             # Store observations for environments that completed this action
 
-            # if action_success.any():
-            #     completed_envs = torch.nonzero(action_success).squeeze(-1)
-            #     for k, v in self.obs_dict.items():
-            #         self.obs_history[k][action_idx + 1, completed_envs] = v[completed_envs]
-            #     if 0 in completed_envs:
-            #         self.frame_history.append(self.env.video_recorder.recorded_frames[-1])
-
             self.action_sequence_failure = self.action_sequence_failure | action_failure
-
-        # print("unique_action_indices", unique_action_indices)
-        # print("gripper pos", self.env.unwrapped.scene["robot"].data.joint_pos[:, -1])
-        
+        print(self.combined_action)
         # Step the environment ONCE with the combined actions
         self.obs_dict = self.env.step(self.combined_action)[0]
         
