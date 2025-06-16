@@ -1,6 +1,6 @@
 import torch
 from typing import Tuple
-
+from .compositional_action import CompositionalAction
 class StateMachine:
     def __init__(self, env):
         """
@@ -43,11 +43,15 @@ class StateMachine:
         Args:
             actions: List of Action objects to execute in sequence
         """
-        self.actions = actions
+        self.actions = []
         # Reset all actions
-        for action in self.actions:
+        for action in actions:
             action.reset()
-            
+            if isinstance(action, CompositionalAction):
+                action.initialize(self.env)
+                self.actions += action.actions_list
+            else:
+                self.actions.append(action)
         # Initialize observation history tensors
         self.obs_history = {}
         for k, v in self.obs_dict.items():
@@ -56,35 +60,6 @@ class StateMachine:
             self.obs_history[k][0] = v  # Store initial observations
 
         self.frame_history = []
-
-    def _get_obs_summary(self) -> str:
-        """Generate a human-readable summary of observation changes.
-        
-        Returns:
-            str: Formatted string showing observation changes between actions
-        """
-        summary = "Initial observations:\n"
-        precision = 3  # Number of decimal places to show and use for thresholding
-        threshold = 10 ** (-precision)
-        
-        # Add initial observations
-        for k, v in self.obs_history.items():
-            summary += f"  {k}: {v[0, 0].cpu().numpy().round(precision)}\n"
-            
-        # Add changes after each action
-        for action_idx in range(len(self.actions)):
-            # Check if any env completed this action
-            if not (self.current_action_idx > action_idx).any():
-                continue
-                
-            summary += f"\nChanges after action {action_idx + 1}:\n"
-            for k, v in self.obs_history.items():
-                prev_vals = v[action_idx, 0]
-                curr_vals = v[action_idx + 1, 0]
-                if not (torch.abs(prev_vals - curr_vals) < threshold).all():
-                    summary += f"    {k}: {curr_vals.cpu().numpy().round(precision)}\n"
-                    
-        return summary
 
     def execute_action_sequence(self, actions) -> Tuple[torch.Tensor, str]:
         """Execute a sequence of actions and return success status and observation summary.
@@ -102,13 +77,12 @@ class StateMachine:
             self.step()
             # if len(self.frame_history) == 0:
             #     self.frame_history.append(self.env.video_recorder.recorded_frames[-1])
-        obs_summary = self._get_obs_summary()
 
         # for frame in self.frame_history:
         #     plt.imshow(frame)
         #     plt.show()
         # print("obs_summary", obs_summary)
-        return self.action_sequence_success, obs_summary, self.frame_history
+        return self.action_sequence_success, self.frame_history
     
     def step(self):
         """
